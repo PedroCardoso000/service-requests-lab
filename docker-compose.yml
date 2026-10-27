@@ -1,0 +1,6 @@
+services:
+  servicerequests.api:
+    image: ${DOCKER_REGISTRY-}servicerequestsapi
+    build:
+      context: .
+      dockerfile: src/ServiceRequests.Api/Dockerfile

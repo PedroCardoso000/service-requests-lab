@@ -1,0 +1,21 @@
+# Compilação e arquivos locais das IDEs
+**/bin/
+**/obj/
+.vs/
+*.user
+*.suo
+
+# Dados locais SQLite; não ignorar Data/, que contém código e migrações
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Configuração local com possíveis credenciais
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Saídas locais de diagnóstico
+*.log
