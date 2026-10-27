@@ -18,4 +18,4 @@ builder.Services.AddDbContext<RequestsDbContext>(options => options.UseSqlite(co
 var app = builder.Build();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapRequests();
-app.Run();
+await app.RunAsync();

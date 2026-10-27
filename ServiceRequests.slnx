@@ -2,6 +2,9 @@
   <Folder Name="/src/">
     <Project Path="src/ServiceRequests.Api/ServiceRequests.Api.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ServiceRequests.Tests/ServiceRequests.Tests.csproj" />
+  </Folder>
   <Project Path="docker-compose.dcproj">
     <Build />
   </Project>

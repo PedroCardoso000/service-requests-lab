@@ -1,0 +1,17 @@
+# Instância local de avaliação. H2 embutido não é uma configuração de produção.
+name: service-requests-quality
+services:
+  sonarqube:
+    image: sonarqube@sha256:aa0d41212704d1ed35f7ae3b49886b39f639590baf8020cdb191c2a2eb8f9eae
+    ports:
+      - "127.0.0.1:9000:9000"
+    environment:
+      SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+    volumes:
+      - sonar-data:/opt/sonarqube/data
+      - sonar-logs:/opt/sonarqube/logs
+      - sonar-extensions:/opt/sonarqube/extensions
+volumes:
+  sonar-data:
+  sonar-logs:
+  sonar-extensions:

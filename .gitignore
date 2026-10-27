@@ -19,3 +19,9 @@
 
 # Saídas locais de diagnóstico
 *.log
+
+# Qualidade: relatórios, cache e credenciais locais
+artifacts/
+**/TestResults/
+.sonarqube/
+.local/

@@ -128,3 +128,62 @@ git log --oneline -5
 O diretório de trabalho contém as edições. `git add` seleciona a versão atual de um arquivo para a área de preparação (staging). `git commit` registra somente o conteúdo preparado. Se editar novamente depois de `git add`, precisa adicioná-lo outra vez para incluir essa nova edição. `git diff` mostra alterações ainda não preparadas; `git diff --staged` mostra o que entrará no commit. Arquivos novos aparecem em `git status`, mas não no `git diff` comum até serem preparados.
 
 Para tirar um arquivo da preparação sem perder a edição, use `git restore --staged README.md`. O .gitignore não remove do histórico arquivos já versionados; ele evita adicionar arquivos locais ainda não rastreados. Commit não publica nada na internet e não substitui uma cópia remota.
+
+## Etapa 4: testes automatizados e SonarQube
+
+Pré-requisitos: SDK do global.json, PowerShell 7 e Docker Desktop apenas para o servidor de análise. Não é necessário iniciar a API para testar.
+
+```powershell
+cd C:\repo\service-requests-lab
+pwsh -NoProfile -File scripts/test.ps1
+pwsh -NoProfile -File scripts/test.ps1 -Coverage
+```
+
+Também é possível executar diretamente `dotnet test tests/ServiceRequests.Tests/ServiceRequests.Tests.csproj`. Usamos o projeto de testes explicitamente para não depender do SDK Docker/Visual Studio incluído na solução existente.
+
+Os 41 casos atuais usam xUnit. DomainTests verifica criação, edição, fluxo principal, cancelamento e transições proibidas. InputTests verifica limites de tamanho e enums. ApiTests verifica permissões por perfil, isolamento entre usuários, fila, atribuição, cancelamento, validação HTTP, persistência, bloqueio das identidades simuladas em Production e conflito de concorrência. ApiFactory hospeda a API em TestServer: sem porta aberta e com um SQLite temporário exclusivo por caso, migrado com as migrações reais e removido ao terminar. O banco do laboratório não é utilizado pelos testes. O conflito de gravação é reproduzido deterministicamente com dois DbContexts lendo a mesma versão; não depende de sorte no agendamento de threads.
+
+Leia a saída nesta ordem:
+
+1. Falhas: nome do teste, esperado/recebido e stack trace. Um teste que falha precisa de investigação; não altere a expectativa apenas para ficar verde.
+2. Resumo: aprovados, falhos e ignorados. Zero falhas não prova ausência de defeitos: comprova apenas os cenários exercitados.
+3. Cobertura: linhas e ramos percorridos. Coverlet gera `artifacts/coverage/coverage.opencover.xml`; resultados de execução ficam em `artifacts/test-results/tests.trx`, que pode ser aberto no Visual Studio. Migrações geradas são excluídas; endpoints, domínio, identidade simulada e Program continuam medidos.
+
+Para executar um subconjunto: `dotnet test tests/ServiceRequests.Tests --filter FullyQualifiedName~DomainTests`.
+
+### Servidor SonarQube local
+
+```powershell
+docker compose -f quality/compose.yml up -d
+Invoke-RestMethod http://localhost:9000/api/system/status
+# Aguarde status UP; na primeira execução pode demorar alguns minutos.
+pwsh -NoProfile -File scripts/initialize-sonar.ps1
+pwsh -NoProfile -File scripts/analyze.ps1
+```
+
+Acesse http://localhost:9000/dashboard?id=service-requests-lab . Esta instalação é somente para avaliação: usa H2 embutido, volumes próprios e porta vinculada a 127.0.0.1. Não é o contêiner da aplicação. A imagem é fixada por digest; não avança a etapa de empacotamento da API. Para parar preservando dados: `docker compose -f quality/compose.yml stop`. Para voltar: `docker compose -f quality/compose.yml up -d`.
+
+O inicializador é destinado à nova instância local, inicialmente admin/admin. Ele troca a senha por uma aleatória, cria um projeto privado e um token de análise de projeto válido por 30 dias. As credenciais são guardadas em `.local/` com proteção DPAPI, legíveis pelo mesmo usuário Windows. Essa pasta está ignorada no Git. Para acessar a interface, usuário `admin`; obtenha a senha apenas no seu terminal:
+
+```powershell
+(Import-Clixml .local/sonar-admin.clixml).GetNetworkCredential().Password
+```
+
+Não cole essa saída em mensagens nem a versione. Também é possível fornecer outro token pela variável de ambiente SONAR_TOKEN. Quando o token expirar, gere outro no SonarQube e use essa variável; não precisa recriar o servidor.
+
+O scanner local está fixado em dotnet-tools.json. O script segue a ordem begin → compilação completa → testes com cobertura → end. SonarQube não executa os testes nem inventa a cobertura: importa os relatórios OpenCover e TRX produzidos aqui. O script aguarda o Quality Gate e falha se ele reprovar. Falha de conexão, compilação ou teste também interrompe a execução; observe em qual etapa o erro ocorreu. Se uma análise for interrompida antes de end, rode o script completo novamente antes de interpretar seus resultados.
+
+A análise usa `scanAll=false` e os arquivos associados aos projetos compilados. O Dockerfile existente também foi incluído pelo SDK do projeto; isso não executa nem altera o contêiner. Apenas as migrações geradas são excluídas do C#. Arquivos novos ainda não commitados podem aparecer com avisos de atribuição de autoria SCM; isso não é falha dos testes.
+
+No painel:
+
+- Overview/Quality Gate: veja o resultado e as condições, distinguindo Overall Code de New Code. Uma primeira análise estabelece a referência; gate verde não significa que não há problemas no código existente.
+- Issues: investigue confiabilidade, segurança e manutenibilidade. Leia a regra e o contexto antes de alterar código.
+- Security Hotspots: exigem revisão humana; um hotspot não comprova vulnerabilidade.
+- Measures/Coverage: abra os arquivos e examine as linhas/condições não exercitadas. A porcentagem agregada do Sonar pode combinar linhas e condições e diferir da coluna Line do Coverlet.
+
+Referências oficiais: https://docs.sonarsource.com/sonarqube-community-build/analyzing-source-code/test-coverage/dotnet-test-coverage e https://docs.sonarsource.com/sonarqube-community-build/try-out-sonarqube .
+
+Resultado verificado em 27/10/2026: 41 testes aprovados, nenhum falho/ignorado; Coverlet com 98,55% de linhas e 93,05% de ramos; SonarQube 26.10.0.133078 com Quality Gate aprovado, cobertura agregada de 98,7% e zero issues abertas/hotspots. As ferramentas contabilizam ramos de forma diferente, portanto seus percentuais não são intercambiáveis. Isso não certifica a segurança da aplicação: a identidade por header continua sendo uma simulação de laboratório.
+
+A análise inicial apontou S6966 (usar RunAsync) e ASP0027 (declaração pública de Program redundante no SDK instalado). A versão final usa `await app.RunAsync()` e dispensa a declaração extra. Os testes e a análise foram executados novamente após os ajustes. Nenhuma regra foi desabilitada para obter o resultado. A análise de validação foi executada antes do commit e informou falta de autoria SCM nos arquivos novos/alterados. Após o commit, uma nova execução da análise associa esses arquivos ao histórico.
